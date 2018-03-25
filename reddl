@@ -3,32 +3,84 @@
 
 require 'vendor/autoload.php';
 require 'regex.class.php';
+require 'Url.class.php';
+require 'UserAgent.class.php';
 
-CONST BASE_URL = 'https://www.reddit.com/r/';
+const BASE_URL = 'https://www.reddit.com/r/';
 $options = getopt('r:l:', ['limit:']);
-$limit = false;
+$limit = null;
 $url = null;
 
-if(empty($options['r']) || !regex::subreddit($options['r'])) {
-	echo "Invalid subreddit name\n";
-	exit();
+if (empty($options['r']) || !regex::subreddit($options['r'])) {
+    echo "Invalid subreddit name\n";
+    exit();
 }
-$url = BASE_URL.$options['r'];
+$url = BASE_URL . $options['r'];
 
 if (!empty($options['limit'])) {
-	$limit = is_int($options['limit']) ? $options['limit'] : null;
+    $limit = (int) $options['limit'] ?? null;
 }
 
 if (!empty($options['l'] && !$limit)) {
-	$limit = is_int($options['l']) ? $options['l'] : null;
+    $limit = (int) $options['l'] ?? null;
 }
+
+$jar = new \GuzzleHttp\Cookie\CookieJar();
+$jar = \GuzzleHttp\Cookie\CookieJar::fromArray(
+    [
+        'over18' => '1',
+    ],
+    '.reddit.com'
+);
 
 $curl = new GuzzleHttp\Client();
 $res = $curl->request('GET', $url, [
-	'headers' => [
-		'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3343.3 Safari/537.36'
-	]
+    'headers' => [
+        'User-Agent' => UserAgent::get(),
+    ],
+    'cookies' => $jar,
 ]);
-echo $res->getBody();
+
+if ($res->getStatusCode() != 200) {
+    echo $res->getReasonPhrase() . "\n";
+    exit();
+}
+
+$content = $res->getBody();
+$dom = new DOMDocument();
+@$dom->loadHTML($content);
+$xpath = new DOMXpath($dom);
+$elements = $xpath->query('/html/body/div[6]/div[2]/div[@id="siteTable"]/div');
+
+foreach ($elements as $element) {
+    foreach ($element->attributes as $attr) {
+        if ($attr->nodeName == 'data-url') {
+            $img_url = Url::detect($attr->nodeValue);
+
+            if (empty($img_url)) {
+                continue;
+            }
+
+            if ($limit !== false) {
+				var_dump($limit);
+				if ($limit <= 0) {
+					exit();
+				}
+                $limit--;
+            }
+
+            if (!file_exists($options['r'])) {
+                mkdir($options['r'], 0755, true);
+            }
+
+            $curl->request('GET', $img_url, [
+                'headers' => [
+                    'User-Agent' => UserAgent::get(),
+                ],
+                'sink' => $options['r'] . parse_url($img_url, PHP_URL_PATH),
+            ]);
+        }
+    }
+}
 
 ?>

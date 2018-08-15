@@ -2,85 +2,36 @@
 <?php
 
 require 'vendor/autoload.php';
-require 'regex.class.php';
-require 'Url.class.php';
-require 'UserAgent.class.php';
+require 'object/regex.class.php';
+require 'object/UserAgent.class.php';
+require 'object/Reddit.class.php';
 
-const BASE_URL = 'https://www.reddit.com/r/';
-$options = getopt('r:l:', ['limit:']);
-$limit = null;
-$url = null;
+require 'conf/const.php';
+require 'conf/curl.php';
 
-if (empty($options['r']) || !regex::subreddit($options['r'])) {
-    echo "Invalid subreddit name\n";
-    exit();
-}
-$url = BASE_URL . $options['r'];
+$hello_cmd = new Commando\Command();
+$hello_cmd->option()
+	->referToAs('subreddit')
+	->require()
+	->must(function ($subreddit) {
+		return regex::subreddit($subreddit);
+	})
+	->describedAs('A subreddit\'s name');
+	
+$hello_cmd->option('l')
+    ->aka('limit')
+    ->describedAs('The number max of picture to download.')
+    ->must(function($limit) {
+		$limit = (int) $limit;
+        return is_int($limit) && $limit > 0;
+	})
+	->map(function ($limit) {
+		return (int) $limit;
+	});
 
-if (!empty($options['limit'])) {
-    $limit = (int) $options['limit'] ?? null;
-}
+$limit = $hello_cmd['limit'] ?? null;
+$url = BASE_URL . $hello_cmd[0];
 
-if (!empty($options['l'] && !$limit)) {
-    $limit = (int) $options['l'] ?? null;
-}
-
-$jar = new \GuzzleHttp\Cookie\CookieJar();
-$jar = \GuzzleHttp\Cookie\CookieJar::fromArray(
-    [
-        'over18' => '1',
-    ],
-    '.reddit.com'
-);
-
-$curl = new GuzzleHttp\Client();
-$res = $curl->request('GET', $url, [
-    'headers' => [
-        'User-Agent' => UserAgent::get(),
-    ],
-    'cookies' => $jar,
-]);
-
-if ($res->getStatusCode() != 200) {
-    echo $res->getReasonPhrase() . "\n";
-    exit();
-}
-
-$content = $res->getBody();
-$dom = new DOMDocument();
-@$dom->loadHTML($content);
-$xpath = new DOMXpath($dom);
-$elements = $xpath->query('/html/body/div[6]/div[2]/div[@id="siteTable"]/div');
-
-foreach ($elements as $element) {
-    foreach ($element->attributes as $attr) {
-        if ($attr->nodeName == 'data-url') {
-            $img_url = Url::detect($attr->nodeValue);
-
-            if (empty($img_url)) {
-                continue;
-            }
-
-            if ($limit !== false) {
-				var_dump($limit);
-				if ($limit <= 0) {
-					exit();
-				}
-                $limit--;
-            }
-
-            if (!file_exists($options['r'])) {
-                mkdir($options['r'], 0755, true);
-            }
-
-            $curl->request('GET', $img_url, [
-                'headers' => [
-                    'User-Agent' => UserAgent::get(),
-                ],
-                'sink' => $options['r'] . parse_url($img_url, PHP_URL_PATH),
-            ]);
-        }
-    }
-}
+$RedditDl->getImage($url, $hello_cmd[0], $limit);
 
 ?>
